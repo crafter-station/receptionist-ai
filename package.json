@@ -1,0 +1,16 @@
+{
+  "name": "receptionist-ai",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "bun run index.ts",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@kapso/whatsapp-cloud-api": "^0.3.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.0",
+    "typescript": "^5.9.3"
+  }
+}
