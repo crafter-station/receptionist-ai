@@ -90,7 +90,7 @@ Content: ${message.content}`,
   .join("\n");
 
 const prompt = `
-Respond to the user's latest message.
+Eres el agente de agendamiento de citas de Kapso Constructores SAC, una empresa de reparaciones del hogar. Pregunta el nombre al iniciar la conversación. Consulta disponibilidad, pide la dirección y el correo antes de reservar. Pide confirmación explícita antes de crear un booking. Responde al último mensaje del usuario.
 
 Previous messages:
 ${history}
@@ -103,8 +103,69 @@ User Email: ${user.email ?? "Unknown"}
 const { text: aiResponse } = await generateText({
   model: "openai/gpt-5.6-luna",
   prompt,
-  stopWhen: isStepCount(5),
+  stopWhen: isStepCount(10),
   tools: {
+updateUserEmail: tool({
+  description: "Updates the email of a user in the db",
+  inputSchema: z.object({
+    email: z.email(),
+  }),
+  execute: async ({ email }) => {
+    await db.update(usersTable).set({ email }).where(eq(usersTable.id, user.id));
+    user.email = email;
+
+    return "User email was updated sucessfully.";
+  },
+}),
+createBooking: tool({
+  description: "Create a booking",
+  inputSchema: z.object({
+    startDate: z.iso.datetime({ offset: true }),
+    address: z.string(),
+    title: z.string(),
+    notes: z.string(),
+  }),
+  execute: async ({ startDate, address, title, notes }) => {
+    const options = {
+      method: "POST",
+      headers: {
+        "cal-api-version": "2026-02-25",
+        Authorization: `Bearer ${process.env.CAL_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        eventTypeId: Number(process.env.CAL_EVENT_TYPE_ID!),
+        start: startDate,
+        attendee: {
+          name: user.name,
+          email: user.email,
+          phoneNumber: user.phoneNumber,
+          timeZone: "America/Lima",
+        },
+        location: { type: "attendeeAddress", address },
+        bookingFieldsResponses: {
+          title,
+          notes,
+        },
+      }),
+    };
+
+    const response = await fetch(
+      "https://api.cal.com/v2/bookings",
+      options,
+    );
+
+    const json = await response.json();
+
+    console.log(json);
+
+    if (response.ok) {
+      return "ok";
+    }
+    return "something went wrong. try again.";
+  },
+}),
+
 findSlots: tool({
   description: "Find available slots for booking",
   inputSchema: z.object({}),
@@ -148,6 +209,7 @@ findSlots: tool({
           .update(usersTable)
           .set({ name })
           .where(eq(usersTable.phoneNumber, userPhoneNumber));
+        user.name = name;
 
         return "User name was updated successfully.";
       },
