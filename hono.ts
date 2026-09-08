@@ -1,6 +1,6 @@
 import { desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/neon-http";
-import { integer, pgTable, text, timestamp, varchar } from "drizzle-orm/pg-core";
+import { boolean, integer, pgTable, text, timestamp, varchar } from "drizzle-orm/pg-core";
 import { WhatsAppClient } from "@kapso/whatsapp-cloud-api";
 import { generateText, isStepCount, tool } from "ai";
 import z from "zod";
@@ -20,6 +20,7 @@ export const messagesTable = pgTable("messages", {
   timestamp: timestamp({ withTimezone: true }),
   kapsoId: varchar({ length: 255 }),
   userId: integer().references(() => usersTable.id).notNull(),
+  isHuman: boolean().default(true),
 });
 
 export type User = typeof usersTable.$inferSelect;
@@ -81,13 +82,18 @@ const dbMessages = await db
   .orderBy(desc(messagesTable.timestamp))
   .limit(10);
 
+const history = dbMessages
+  .map(
+    (message) => `${message.isHuman ? "Human" : "AI"} at ${message.timestamp}
+Content: ${message.content}`,
+  )
+  .join("\n");
+
 const prompt = `
 Respond to the user's latest message.
 
 Previous messages:
-${dbMessages
-  .map((message) => `${message.timestamp}: ${message.content}`)
-  .join("\n")}
+${history}
 
 WhatsApp Username: ${userUsername}
 User Name: ${user.name ?? "Unknown"}
@@ -116,11 +122,19 @@ const { text: aiResponse } = await generateText({
   },
 });
 
-  await kapso.messages.sendText({
-    phoneNumberId: process.env.KAPSO_PHONE_NUMBER_ID!,
-    to: userPhoneNumber,
-    body: aiResponse,
-  });
+const kapsoResponse = await kapso.messages.sendText({
+  phoneNumberId: process.env.KAPSO_PHONE_NUMBER_ID!,
+  to: userPhoneNumber,
+  body: aiResponse,
+});
+
+await db.insert(messagesTable).values({
+  isHuman: false,
+  content: aiResponse,
+  userId: user.id,
+  timestamp: new Date(),
+  kapsoId: kapsoResponse.messages[0]?.id,
+});
 
   return c.text("OK");
 });
