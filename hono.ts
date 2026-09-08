@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/neon-http";
-import { integer, pgTable, varchar } from "drizzle-orm/pg-core";
+import { integer, pgTable, text, timestamp, varchar } from "drizzle-orm/pg-core";
 import { WhatsAppClient } from "@kapso/whatsapp-cloud-api";
 import { generateText, isStepCount, tool } from "ai";
 import z from "zod";
@@ -12,6 +12,13 @@ export const usersTable = pgTable("users", {
 	email: varchar({ length: 255 }),
 	phoneNumber: varchar({ length: 255 }).notNull(),
 	username: varchar({ length: 255 }).notNull(),
+});
+
+export const messagesTable = pgTable("messages", {
+  id: integer().primaryKey().generatedAlwaysAsIdentity(),
+  content: text(),
+  timestamp: timestamp({ withTimezone: true }),
+  kapsoId: varchar({ length: 255 }),
 });
 
 const db = drizzle(process.env.DATABASE_URL!);
@@ -43,7 +50,15 @@ app.post("/webhooks/whatsapp", async (c) => {
     });
   }
 
-  const userMessage = body.message.text.body;
+const userMessage = body.message.text.body;
+const userMessageId = body.message.id;
+const userMessageTimestamp = body.message.timestamp;
+
+await db.insert(messagesTable).values({
+  kapsoId: userMessageId,
+  content: userMessage,
+  timestamp: new Date(Number(userMessageTimestamp) * 1000),
+});
 
 const prompt = `
 Respond to this user message: ${userMessage}
