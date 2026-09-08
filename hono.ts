@@ -105,6 +105,39 @@ const { text: aiResponse } = await generateText({
   prompt,
   stopWhen: isStepCount(5),
   tools: {
+findSlots: tool({
+  description: "Find available slots for booking",
+  inputSchema: z.object({}),
+  execute: async () => {
+    const options = {
+      method: "GET",
+      headers: {
+        "cal-api-version": "2024-09-04",
+        Authorization: `Bearer ${process.env.CAL_API_KEY}`,
+      },
+    };
+
+    const query = new URLSearchParams({
+      eventTypeId: process.env.CAL_EVENT_TYPE_ID!,
+      start: new Date().toISOString().split("T")[0]!,
+      end: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .split("T")[0]!,
+      timeZone: "America/Lima",
+    });
+
+    const response = await fetch(
+      `https://api.cal.com/v2/slots?${query}`,
+      options,
+    );
+    const json = (await response.json()) as { data: [] };
+
+    console.log(json);
+
+    return json.data;
+  },
+}),
+
     updateUserName: tool({
       description: "Updates the name of the current user in the database",
       inputSchema: z.object({
