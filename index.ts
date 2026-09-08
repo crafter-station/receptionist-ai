@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/neon-http";
 import { boolean, integer, pgTable, text, timestamp, varchar } from "drizzle-orm/pg-core";
@@ -32,12 +33,35 @@ const kapso = new WhatsAppClient({
 	kapsoApiKey: process.env.KAPSO_API_KEY!,
 });
 
+function verifyWebhook(rawBody: string, signature: string, secret: string) {
+	if (typeof signature !== "string") return false;
+
+	const expected = createHmac("sha256", secret).update(rawBody).digest("hex");
+
+	const a = Buffer.from(expected, "utf8");
+	const b = Buffer.from(signature, "utf8");
+
+	// timingSafeEqual throws on length mismatch, so check length first
+	return a.length === b.length && timingSafeEqual(a, b);
+}
+
 const app = new Hono();
 
 app.get("/", (c) => c.text("Hello Kapso!"));
 
 app.post("/webhooks/whatsapp", async (c) => {
-  const body = await c.req.json();
+	const rawBody = await c.req.text();
+	const signature = c.req.header("x-webhook-signature");
+
+	if (!signature) {
+		return c.text("Invalid signature", 401);
+	}
+
+	if (!verifyWebhook(rawBody, signature, process.env.KAPSO_WEBHOOK_SECRET!)) {
+		return c.text("Invalid signature", 401);
+	}
+
+	const body = JSON.parse(rawBody);
 
   const userPhoneNumber = body.message.from;
   const userUsername = body.message.username;
