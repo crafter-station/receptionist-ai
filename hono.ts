@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/neon-http";
 import { integer, pgTable, text, timestamp, varchar } from "drizzle-orm/pg-core";
 import { WhatsAppClient } from "@kapso/whatsapp-cloud-api";
@@ -19,7 +19,10 @@ export const messagesTable = pgTable("messages", {
   content: text(),
   timestamp: timestamp({ withTimezone: true }),
   kapsoId: varchar({ length: 255 }),
+  userId: integer().references(() => usersTable.id).notNull(),
 });
+
+export type User = typeof usersTable.$inferSelect;
 
 const db = drizzle(process.env.DATABASE_URL!);
 
@@ -43,12 +46,22 @@ app.post("/webhooks/whatsapp", async (c) => {
     .from(usersTable)
     .where(eq(usersTable.phoneNumber, userPhoneNumber));
 
-  if (!existingUser) {
-    await db.insert(usersTable).values({
+let user: User | null = null;
+
+if (existingUser) {
+  user = existingUser;
+} else {
+  const [createdUser] = await db
+    .insert(usersTable)
+    .values({
       phoneNumber: userPhoneNumber,
       username: userUsername,
-    });
-  }
+    })
+    .returning();
+  user = createdUser ?? null;
+}
+
+if (!user) throw new Error("Could not resolve WhatsApp user");
 
 const userMessage = body.message.text.body;
 const userMessageId = body.message.id;
@@ -58,13 +71,27 @@ await db.insert(messagesTable).values({
   kapsoId: userMessageId,
   content: userMessage,
   timestamp: new Date(Number(userMessageTimestamp) * 1000),
+  userId: user.id,
 });
 
+const dbMessages = await db
+  .select()
+  .from(messagesTable)
+  .where(eq(messagesTable.userId, user.id))
+  .orderBy(desc(messagesTable.timestamp))
+  .limit(10);
+
 const prompt = `
-Respond to this user message: ${userMessage}
+Respond to the user's latest message.
+
+Previous messages:
+${dbMessages
+  .map((message) => `${message.timestamp}: ${message.content}`)
+  .join("\n")}
+
 WhatsApp Username: ${userUsername}
-User Name: ${existingUser?.name ?? "Unknown"}
-User Email: ${existingUser?.email ?? "Unknown"}
+User Name: ${user.name ?? "Unknown"}
+User Email: ${user.email ?? "Unknown"}
 `;
 
 const { text: aiResponse } = await generateText({
